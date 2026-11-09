@@ -1,0 +1,32 @@
+{
+  "summary": "Iteration 3 backend-only verification of the /api/gmail/sync 403 error surfacing improvement. All 16 tests passed (7 code-inspection + 2 live sync branches + 7 regression). Code inspection of /app/backend/server.py confirms gmail_sync now has: (1) explicit `if list_res.status_code == 403:` branch that raises HTTPException(status_code=403) with detail containing the hint 'Gmail API is not enabled' AND the URL 'console.cloud.google.com/apis/library/gmail.googleapis.com'; (2) `except httpx.HTTPStatusError` branch that reads e.response.json() to pull out error.message and raises HTTPException(status_code=502) with 'Gmail API error {status}: {message}' detail. Live checks: POST /api/gmail/sync {access_token:'invalid-token-xxx'} -> 401 with detail 'access_token expired' (Google returns 401 for garbage bearer, as expected). POST /api/gmail/sync {access_token:''} -> 400 'access_token missing'. NOTE: could not exercise the 403 branch live because Google returns 401 (not 403) for a fabricated token; the 403 path only fires for a real revoked/scope-limited token from a project without Gmail API enabled — verified via code inspection instead, as explicitly requested in the review. Regression clean: /api/health -> 200; /api/gmail/start -> 307 redirect to accounts.google.com/o/oauth2/v2/auth with full client_id 501695473048-usisj9i3b5o4b35kr3fslavust3olomd.apps.googleusercontent.com; /api/gmail/session/consume {bad id} -> 404 'Session expired or invalid'; /api/gmail/refresh {bad token} -> 401; /api/gmail/revoke -> {revoked: true}; /api/parse/text still parses text (product_name/price/platform); /api/ocr/order route mounted (non-404). Frontend NOT tested per review instructions ('backend only').",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_gmail_sync_403.py",
+    "/app/test_reports/pytest/iteration_3_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "gmail_sync (server.py L557-598) correctly ordering error branches: 401 first, then 403 (with actionable hint + console URL), then httpx.HTTPStatusError -> 502 with Google's real error.message surfaced, then catch-all Exception -> 502. Good.",
+    "The 403 hint text is user-friendly and points to the exact Cloud Console page to enable Gmail API — matches the RCA of the reported user issue.",
+    "Minor: for the 502 branch, detail truncates Google's message at 400 chars which is sensible, but the raw response body is logged via logger.exception so full context is preserved on the server. Good defensive posture.",
+    "gmail_refresh (L445-446) still wraps only HTTPStatusError as 401; any network/timeout error would bubble as 500. Non-blocking for this iteration but noted from iteration 2."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_gmail_sync_403.py",
+    "/app/test_reports/pytest/iteration_3_results.xml",
+    "/app/test_reports/iteration_3.json"
+  ],
+  "success_rate": { "backend": "100%", "frontend": "not tested (backend-only iteration)" },
+  "seed_data_creation": "None. Tests use bogus tokens against public endpoints; no DB writes.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "To re-verify this iteration: `EXPO_PUBLIC_BACKEND_URL=https://order-central-88.preview.emergentagent.com pytest /app/backend/tests/test_gmail_sync_403.py -v` (16 tests, ~4s). Note that the 403 branch cannot be triggered with fake credentials — Google returns 401 for garbage bearers. The deterministic proof for the 403 improvement lives in the 4 code-inspection tests under TestGmailSyncCode403Branch. If the frontend gmail-review screen needs verification, iteration 2 already covered the connect flow; the review explicitly said 'do NOT re-test full OAuth handshake'.",
+  "rca_of_issue": "User's /api/gmail/sync returned 502 masking a Gmail API 403. Root cause on the USER side: their Google Cloud project either did not have the Gmail API enabled OR the granted OAuth scope did not include gmail.readonly at token-mint time. Backend fix applied by main agent in server.py gmail_sync: (a) new explicit 403 branch raises HTTPException(403, detail=<google_error> — <actionable hint including console.cloud.google.com/apis/library/gmail.googleapis.com URL>); (b) HTTPStatusError branch now extracts Google's real error.message via e.response.json().error.message and surfaces it in HTTPException(502, detail='Gmail API error {status}: {message}') instead of the previous opaque wrapper. Reproduction steps for the 403 (requires manual setup, cannot automate): mint a real Gmail OAuth access_token via /api/gmail/start with a Google account whose Cloud project has Gmail API disabled, then POST that token to /api/gmail/sync — expect 403 with 'Gmail API is not enabled ... console.cloud.google.com/apis/library/gmail.googleapis.com ...' in detail. Mitigation for end user: follow the hint URL to enable the Gmail API, then Disconnect + Reconnect Gmail in Settings so a fresh token is minted with the correct scope."
+}

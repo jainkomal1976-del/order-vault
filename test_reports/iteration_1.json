@@ -1,0 +1,40 @@
+{
+  "summary": "OrderVault MVP first-pass testing complete. Backend: 5/5 pytest tests passed (root, health, OCR valid image, OCR data-URI prefix, OCR invalid payload graceful). Frontend: Home layout renders correctly (OrderVault header, search bar, 2 filter chip rows, 3 summary cards, empty state with CTA), 4 bottom tabs navigate correctly, Add Order form fills+saves and card appears on Home with correct Flipkart accent stripe / product / status badge / ₹499 formatting, search + platform-chip + status-chip filters work, tapping card opens /order/[id] detail with timeline, Mark Delivered updates status and shows 'X days left to return' banner (7 days left to return by Aug 11, 2026 - verified), Analytics tab renders bar chart + donut pie (2 SVGs) with platform breakdown, Settings Dark radio visibly switches theme (screenshots confirm), Clear-all-orders requires two taps (first shows 'Tap again to confirm', second clears + toast 'All orders cleared') and Home returns to empty state.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "ToastModal", "issue": "After Save Order / Mark Delivered, the toast modal briefly overlays the bottom tab bar and intercepts tab taps for ~1s. On web preview this made get_by_text tab clicks fail with 'Element is not visible'. Consider pointerEvents='box-none' on the toast backdrop, or shorter dismiss timeout, so navigation isn't briefly blocked.", "testID": "toast (no testID)", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "global", "issues": ["Console warnings: '\"shadow*\" style props are deprecated. Use \"boxShadow\"' and 'props.pointerEvents is deprecated. Use style.pointerEvents' — coming from a library / inline styles. Non-blocking but should be cleaned up."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_backend.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "OPTIONAL: Make ToastModal non-blocking (backdrop pointerEvents='box-none' or shorter auto-dismiss) so bottom tabs remain tappable during the toast animation.",
+    "OPTIONAL: Silence deprecation warnings (shadow*, pointerEvents) — likely inside a shared component's inline style; migrate to boxShadow / style.pointerEvents."
+  ],
+  "critical_code_review_comments": [
+    "server.py: EMERGENT_LLM_KEY missing returns HTTP 500 — acceptable, but consider 503 for clarity.",
+    "server.py is small (~175 lines), clean, MongoDB _id not exposed (no CRUD returning docs).",
+    "Frontend uses EXPO_PUBLIC_BACKEND_URL correctly (process.env.EXPO_PUBLIC_BACKEND_URL) in add.tsx.",
+    "All interactive elements have proper testIDs (platform-select-<lower>, category-pill-<lower>, status-pill-<slug>, save-order-btn, mark-delivered-btn, theme-dark-row, clear-all-row, home-search-input, platform-chip-<lower>, status-chip-<lower>).",
+    "Bottom-tab tabBarTestID is present in _layout.tsx but not queryable on Expo web preview — expected limitation; text selectors work fine."
+  ],
+  "updated_files": [
+    "/app/backend/tests/__init__.py",
+    "/app/backend/tests/test_backend.py",
+    "/app/backend/tests/test_ecom.jpg"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "No DB seeding — storage is AsyncStorage (local). Tests created two orders (Wireless Mouse Flipkart ₹499, Kindle Amazon ₹1200) during UI runs; cleared at end via Clear-all-orders.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend OCR endpoint takes ~5-6s per call with Gemini vision — use timeout>=90s. Frontend uses AsyncStorage (no DB), so between test runs previous orders may persist for the same browser session; navigate to Settings → Clear all orders (two taps) to reset. Platform chip testIDs are lowercase: platform-chip-flipkart / platform-chip-amazon / platform-chip-all. Status chip testIDs: status-chip-ordered / status-chip-all etc. Add-order platform buttons: platform-select-flipkart etc. Bottom-tab tabBarTestIDs (tab-home, tab-add, tab-analytics, tab-settings) are NOT queryable on Expo web preview — use page.get_by_text('Home'|'Add Order'|'Analytics'|'Settings').first, but note that toasts briefly block tab clicks after save actions — fall back to page.goto('/add' etc) when a toast is visible.",
+  "rca_of_issue": ""
+}

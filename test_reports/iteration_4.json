@@ -1,0 +1,49 @@
+{
+  "summary": "Backend + frontend verification of the Gmail order status extraction fix. Backend: 15/15 pytest tests pass in ~8s. /api/parse/text now returns a `status` field for all 5 email templates (Delivered/Out for Delivery/Ordered/Shipped/Cancelled) — the Gemini LLM correctly extracts status from each. OCRResponse pydantic model exposes optional `status` (line 110); _coerce_parsed nulls invalid status values (verified via direct import). _status_from_subject helper exists in server.py (L559-617) and correctly maps 'delivered'/'out for delivery'/'shipped'/'dispatched'/'cancelled'/'return'/'exchange'/'order placed' subject substrings. Source-code inspection of gmail_sync confirms the flow: LLM parse -> subject-line override (subj_status wins if present) -> final fallback item.status='Ordered'. Regression clean: /api/health 200, /api/gmail/start 307 to accounts.google.com with full client_id, session/consume 404, refresh 401, sync 401 for bad tokens, /api/ocr/order route mounted. Frontend: file inspection confirmed groupItems/groupKey/normOrderId/normProduct helpers exist with correct grouping key precedence (oid > platform+product > message_id); statusRank promotes terminal statuses (Cancelled/Returned/Exchanged) to rank>=100 (L57-65); saveGroup passes extracted status via isValidStatus and calls updateOrder({status}) only when statusRank(new)>statusRank(existing) (L220-238); primary is promoted on later-stage status with backfill for missing fields (L112-128). UI smoke test at /gmail-review with no Gmail state renders SafeArea + back button + 'Gmail is not connected.' error correctly. HOWEVER — one clear regression against the review request: since_days is still 30 on the frontend (should be 15) at gmail-review.tsx:167, and the empty-state text 'No new orders in the last 30 days' at line 331 also still says 30. Main agent updated the backend contract but forgot to flip the frontend value. This is the ONLY failing acceptance criterion.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "gmail-review.tsx",
+        "issue": "since_days sent in fetch body is still 30, not 15 as required by the review request. File: /app/frontend/app/gmail-review.tsx line 167 ('since_days: 30,').",
+        "testID": "n/a",
+        "priority": "HIGH"
+      },
+      {
+        "component": "gmail-review.tsx empty-state text",
+        "issue": "Empty state message hardcodes 'No new orders in the last 30 days' — should read 15 days to match the new window. File: /app/frontend/app/gmail-review.tsx line 331.",
+        "testID": "n/a",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_status_extraction.py",
+    "/app/test_reports/pytest/iteration_4_results.xml"
+  ],
+  "action_items": [
+    "In /app/frontend/app/gmail-review.tsx line 167 change `since_days: 30` -> `since_days: 15`.",
+    "In /app/frontend/app/gmail-review.tsx line 331 change the empty-state string from 'No new orders in the last 30 days' -> 'No new orders in the last 15 days' (keep it as a single source of truth — ideally hoist to a const if the window may change again)."
+  ],
+  "critical_code_review_comments": [
+    "server.py _status_from_subject (L559-617): checks are ordered correctly (Cancelled > Returned > Exchanged > Delivered > Out for Delivery > Shipped > Ordered), which handles ambiguous subjects like 'Your order has been delivered but a partial return was initiated' — Returned would incorrectly win because the check order puts return before delivered. Consider: for real-world Amazon subjects that mention both, the terminal state (Cancelled/Returned) is usually the intended semantic anyway, so current ordering is defensible. Non-blocking.",
+    "server.py gmail_sync (L737-744): the subject override runs AFTER LLM parse and unconditionally overwrites item.status when subj_status is truthy. This is correct because subjects are the more reliable signal, exactly matching the RCA. The final `elif not item.status: item.status = 'Ordered'` fallback matches the review requirement — verified by test_gmail_sync_uses_subject_override.",
+    "gmail-review.tsx statusRank (L59-65): TERMINAL rank starts at 100, correctly higher than any STATUS_TIMELINE index. Good.",
+    "gmail-review.tsx saveGroup (L212-274): correctly uses isValidStatus(it.status)?it.status:'Ordered' — the original bug (hardcoded 'Ordered') is fixed. Dup path calls updateOrder ONLY when statusRank(new)>statusRank(existing) — preventing the exact regression of overwriting Delivered with Ordered.",
+    "gmail-review.tsx L31: uses `process.env.EXPO_PUBLIC_BACKEND_URL` which matches the actual frontend/.env variable. Correct."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_status_extraction.py",
+    "/app/test_reports/pytest/iteration_4_results.xml",
+    "/app/test_reports/iteration_4.json"
+  ],
+  "success_rate": { "backend": "100% (15/15)", "frontend": "smoke-test passed; 2 acceptance criteria failures (since_days=30 instead of 15, empty-state text still says 30 days)" },
+  "seed_data_creation": "None. Tests hit public /api endpoints and directly import server.py helpers.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Re-run: `EXPO_PUBLIC_BACKEND_URL=https://order-central-88.preview.emergentagent.com pytest /app/backend/tests/test_status_extraction.py -v` (15 tests, ~8s). After main agent flips the two `30 -> 15` frontend lines, grep to verify: `grep -n '30' /app/frontend/app/gmail-review.tsx` should show no since_days or empty-state '30 days' remaining. LLM-driven status tests (TestParseTextStatus) each take 3-8s because they call Gemini; if any becomes flaky, prefer the rule-based TestStatusFromSubject class as the primary deterministic proof — the LLM parse alone is a nice-to-have because the gmail_sync path relies on _status_from_subject as the authoritative override anyway.",
+  "rca_of_issue": "Original user bug: Gmail-imported delivered orders showed 'Ordered'. Two root causes were correctly identified and fixed by the main agent: (a) frontend saveGroup hardcoded status='Ordered' — now fixed to use extracted status via isValidStatus; (b) LLM prompt didn't ask for status — now extended in OCR_SYSTEM_PROMPT. Additionally the main agent added _status_from_subject rule-based override in gmail_sync (the more reliable signal — subjects almost always spell out the stage) plus a grouping layer in gmail-review.tsx so one order = one row showing the latest stage via statusRank. All of that is verified by this iteration. The ONE remaining miss is that the fetch body in gmail-review.tsx still sends since_days:30 — needs to be 15 per the user's other ask in the same fix ticket. Reproduction: open /gmail-review with a connected Gmail account; devtools Network -> POST /api/gmail/sync body would show since_days:30. Mitigation: change line 167 to `since_days: 15,` and line 331 empty-state text to '...15 days'."
+}

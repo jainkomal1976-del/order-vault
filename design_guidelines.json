@@ -1,0 +1,199 @@
+{
+  "app_name": "OrderVault",
+  "personality": "1 iOS-Native Clean",
+  "personality_one_liner": "A high-clarity, friction-free vault that frames colorful e-commerce data within a crisp, neutral iOS-native structure.",
+  "color": {
+    "surface": "#F2F2F7",
+    "onSurface": "#1C1C1E",
+    "surfaceSecondary": "#FFFFFF",
+    "onSurfaceSecondary": "#1C1C1E",
+    "surfaceTertiary": "#E5E5EA",
+    "onSurfaceTertiary": "#1C1C1E",
+    "surfaceInverse": "#1C1C1E",
+    "onSurfaceInverse": "#F2F2F7",
+    "brand": "#000000",
+    "brandPrimary": "#000000",
+    "onBrandPrimary": "#FFFFFF",
+    "brandSecondary": "#3A3A3C",
+    "onBrandSecondary": "#FFFFFF",
+    "brandTertiary": "#E5E5EA",
+    "onBrandTertiary": "#000000",
+    "success": "#34C759",
+    "onSuccess": "#FFFFFF",
+    "warning": "#FF9500",
+    "onWarning": "#FFFFFF",
+    "error": "#FF3B30",
+    "onError": "#FFFFFF",
+    "info": "#8E8E93",
+    "onInfo": "#FFFFFF",
+    "border": "#C6C6C8",
+    "borderStrong": "#8E8E93",
+    "divider": "#C6C6C8",
+    "dark": {
+      "surface": "#000000",
+      "onSurface": "#F2F2F7",
+      "surfaceSecondary": "#1C1C1E",
+      "onSurfaceSecondary": "#F2F2F7",
+      "surfaceTertiary": "#2C2C2E",
+      "onSurfaceTertiary": "#F2F2F7",
+      "surfaceInverse": "#F2F2F7",
+      "onSurfaceInverse": "#1C1C1E",
+      "brand": "#FFFFFF",
+      "brandPrimary": "#FFFFFF",
+      "onBrandPrimary": "#000000",
+      "brandSecondary": "#E5E5EA",
+      "onBrandSecondary": "#000000",
+      "brandTertiary": "#2C2C2E",
+      "onBrandTertiary": "#FFFFFF",
+      "success": "#30D158",
+      "onSuccess": "#000000",
+      "warning": "#FF9F0A",
+      "onWarning": "#000000",
+      "error": "#FF453A",
+      "onError": "#FFFFFF",
+      "info": "#98989D",
+      "onInfo": "#000000",
+      "border": "#38383A",
+      "borderStrong": "#636366",
+      "divider": "#38383A"
+    },
+    "platform_colors": {
+      "Amazon": "#FF9900",
+      "Flipkart": "#2874F0",
+      "Myntra": "#FF3F6C",
+      "Ajio": "#E53935",
+      "Nykaa": "#FC2779",
+      "Meesho": "#9F2089"
+    }
+  },
+  "typography": {
+    "displayFontFamily": "Plus Jakarta Sans",
+    "textFontFamily": "Plus Jakarta Sans",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Generous padding around content. iOS-native rhythms. Do not cramp elements.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 6,
+    "md": 12,
+    "lg": 20,
+    "pill": 999
+  },
+  "shadow_tier": "1",
+  "navigation": "bottom_tabs",
+  "icon_set": "Phosphor",
+  "glassmorphism": {
+    "enabled": true,
+    "do's": [
+      "Use on bottom tab bar",
+      "Use on sticky header over scrolling list",
+      "Use on filter chip row background when scrolling under"
+    ],
+    "dont's": [
+      "Do not use on individual order cards",
+      "Do not use on form inputs"
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler",
+    "charts": "react-native-gifted-charts"
+  },
+  "screens": [
+    {
+      "name": "Home",
+      "purpose": "Dashboard to view stats and track orders.",
+      "states": {
+        "loading": "Centered native spinner",
+        "empty": "Illustration of an empty cardboard box + 'No orders logged yet. Start tracking!' + Primary CTA to Add Order.",
+        "error": "Error message with Retry button"
+      },
+      "layout": "Sticky Header with Search Bar. Below it, a single horizontal scrolling filter chip row (56pt height row, 36pt height chips, no wrapping). Below filters: a horizontal pager or 2-column grid of Summary Cards (Total spent, In transit, Return eligible). Below that: Vertical list of order cards. Each order card MUST display the platform color as a visual accent (e.g., left border strip or tinted logo background), product name, order status badge, and 'X days left' return badge if applicable."
+    },
+    {
+      "name": "Add Order",
+      "purpose": "Frictionless form to manually enter or OCR an order.",
+      "states": {
+        "loading": "Spinner during OCR processing",
+        "empty": "N/A",
+        "error": "N/A"
+      },
+      "layout": "Top banner for OCR: 'Paste screenshot to auto-fill' using Gemini. Below, horizontal grid/row of platform selector circles utilizing the custom `platform_colors`. Form fields (Product name, Price, Expected delivery, Return deadline) follow in a single column with labels above inputs. Sticky 'Save Order' CTA button at the bottom using KeyboardAvoidingView."
+    },
+    {
+      "name": "Order Detail",
+      "purpose": "Detailed view of an order with its delivery timeline and return tracking.",
+      "states": {
+        "loading": "Skeleton loader for order details",
+        "empty": "N/A",
+        "error": "Failed to load order details"
+      },
+      "layout": "Product info hero at the top with Platform logo/color context. A highly visible 'X days left for return' badge prominently positioned (using 'warning' or 'error' tokens depending on urgency). Below, a vertical Status Timeline Stepper (Ordered -> Shipped -> Out for Delivery -> Delivered -> Returned/Exchanged). Include a 'Notes' section at the bottom."
+    },
+    {
+      "name": "Analytics",
+      "purpose": "Visual insights on user's spending habits.",
+      "states": {
+        "loading": "Spinner",
+        "empty": "Empty state illustration + 'Add orders to see your spending insights'",
+        "error": "Failed to load chart data"
+      },
+      "layout": "Vertical scroll. Top section: Bar chart showing monthly spend grouped by platform (using react-native-gifted-charts, bars color-coded by platform). Middle section: Pie chart showing spend by category. Bottom section: summary statistics."
+    },
+    {
+      "name": "Settings",
+      "purpose": "App preferences and data management.",
+      "states": {
+        "loading": "N/A",
+        "empty": "N/A",
+        "error": "N/A"
+      },
+      "layout": "Standard iOS-native grouped list view. Include options for Dark Mode toggle and 'Export to CSV' button."
+    }
+  ],
+  "images": {
+    "empty_state_box": {
+      "url": "https://images.unsplash.com/photo-1573376670329-0261ea9fde97?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzJ8MHwxfHNlYXJjaHwxfHxlbXB0eSUyMGJveCUyMGlsbHVzdHJhdGlvbnxlbnwwfHx8fDE3ODU4NTk2ODB8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "Empty cardboard box"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Strictly use the 'Plus Jakarta Sans' font family and neutral brand colors (black/white) to ensure the vibrant platform colors (Amazon orange, Myntra pink, etc.) pop effectively.",
+    "Implement the Filter Chip Row exactly as specified: single horizontal ScrollView, no flexWrap, 36pt height for individual chips, inside a 56pt height container.",
+    "For the Analytics screen, use `react-native-gifted-charts` as requested by the user, applying the `platform_colors` object to style the bars/pie slices according to the e-commerce brand.",
+    "The Return deadline badge must explicitly calculate and display 'X days left'. Use the 'warning' color token if <= 3 days, and 'success' or default neutral if plenty of time remains.",
+    "Ensure the Status Timeline Stepper in the Order Detail view is vertical and clearly marks completed vs. pending steps.",
+    "When fetching platform logos isn't possible natively, fall back to Initials Avatar (e.g. 'A' for Amazon) but MUST use the specified `platform_colors` as the background for those avatars.",
+    "Ensure dark mode is fully mapped out. The 'surface' in dark mode is true black (#000000) and 'surfaceSecondary' is #1C1C1E, avoiding any purple/indigo hues entirely."
+  ],
+  "haptics": {
+    "events": {
+      "chip_press": "light",
+      "platform_select": "medium",
+      "save_order": "success",
+      "toggle_switch": "light"
+    }
+  }
+}
