@@ -17,6 +17,10 @@ from urllib.parse import urlencode
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import httpx
+from order_accuracy import (
+    email_body, gmail_date, confirmed_price, confirmed_order_id,
+    confirmed_status, merge_by_evidence, explicit_products,
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -668,46 +672,7 @@ async def gmail_revoke(payload: RevokeRequest):
 
 # ---------- Gmail Sync ----------
 def _extract_message_body(payload: Dict[str, Any]) -> str:
-    """Recursively find text/plain (fallback: text/html stripped) parts and concat."""
-    if not payload:
-        return ""
-
-    def _decode_data(data: str) -> str:
-        try:
-            return base64.urlsafe_b64decode(data + "===").decode("utf-8", errors="ignore")
-        except Exception:
-            return ""
-
-    def _walk(part: Dict[str, Any], want_html: bool = False) -> List[str]:
-        out: List[str] = []
-        mime = part.get("mimeType", "")
-        if mime.startswith("multipart/"):
-            for sub in part.get("parts", []) or []:
-                out.extend(_walk(sub, want_html))
-            return out
-        body = part.get("body", {}) or {}
-        data = body.get("data")
-        if not data:
-            return out
-        if mime == "text/plain" and not want_html:
-            out.append(_decode_data(data))
-        elif mime == "text/html" and want_html:
-            html = _decode_data(data)
-            # Simple HTML strip
-            html = re.sub(r"<script[\s\S]*?</script>", " ", html, flags=re.IGNORECASE)
-            html = re.sub(r"<style[\s\S]*?</style>", " ", html, flags=re.IGNORECASE)
-            html = re.sub(r"<[^>]+>", " ", html)
-            html = re.sub(r"\s+", " ", html)
-            out.append(html)
-        return out
-
-    parts_txt = _walk(payload, want_html=False)
-    text = "\n".join([p for p in parts_txt if p.strip()])
-    if text.strip():
-        return text
-    parts_html = _walk(payload, want_html=True)
-    return "\n".join([p for p in parts_html if p.strip()])
-
+    return email_body(payload)
 
 def _get_header(headers: List[Dict[str, str]], name: str) -> Optional[str]:
     lname = name.lower()
@@ -997,51 +962,7 @@ def _status_from_body(body: str, email_dt: Optional[str] = None) -> Dict[str, Op
 
 
 def _parse_price(text: str) -> Optional[float]:
-    """Extract first plausible price from text (₹, Rs, or plain digits).
-    Improved: handles multiple currency formats and context."""
-    if not text:
-        return None
-
-    # Priority 1: Common price patterns with currency symbols: ₹299, Rs. 299, INR 299
-    patterns = [
-        r"(?:Price|Total|Cost|Amount)[:\s]*(?:₹|Rs\.?|INR\s*)\s*([0-9]{1,3}(?:[,0-9]{0,})?(?:\.\d{1,2})?)",
-        r"(?:₹|Rs\.?|INR\s*)\s*([0-9]{1,3}(?:[,0-9]{0,})?(?:\.\d{1,2})?)",
-        r"(?:Rs\s|₹\s|INR\s)([0-9]{1,6}(?:[,0-9]{0,})?(?:\.\d{1,2})?)",
-    ]
-
-    for pattern in patterns:
-        m = re.search(pattern, text, flags=re.IGNORECASE)
-        if m:
-            try:
-                price_str = m.group(1).replace(",", "")
-                price = float(price_str)
-                if 0 < price < 1000000:  # Reasonable price range for e-commerce
-                    return price
-            except Exception:
-                pass
-
-    # Priority 2: Numbers near "price", "cost", "amount", "total" keywords
-    m = re.search(r"(?:price|cost|amount|total|paid|charged)[:\s]*([0-9]{1,6}(?:\.[0-9]{1,2})?)", text, flags=re.IGNORECASE)
-    if m:
-        try:
-            price = float(m.group(1))
-            if 0 < price < 1000000:
-                return price
-        except Exception:
-            pass
-
-    # Priority 3: Extract from "Subtotal", "Grand Total", "Amount Payable" patterns
-    m = re.search(r"(?:Subtotal|Grand\s+Total|Amount\s+Payable|Total\s+Price)[:\s]*(?:₹|Rs\.?|INR)?\s*([0-9]{1,6}(?:[,0-9]{0,})?(?:\.\d{1,2})?)", text, flags=re.IGNORECASE)
-    if m:
-        try:
-            price_str = m.group(1).replace(",", "")
-            price = float(price_str)
-            if 0 < price < 1000000:
-                return price
-        except Exception:
-            pass
-    return None
-
+    return confirmed_price(text)
 
 def _parse_amazon_body(body: str) -> Dict[str, Optional[str]]:
     """Heuristic extraction for Amazon order emails with improved patterns."""
@@ -1474,31 +1395,8 @@ def _normalize_product_name(name: str) -> str:
 
 
 def _infer_status_from_age(status: str, email_date: Optional[str]) -> str:
-    """Infer actual delivery status based on email age.
-    Example: An old "Out for Delivery" email is likely "Delivered" by now.
-    """
-    if not status or not email_date:
-        return status
-
-    # Only adjust if status is "Out for Delivery"
-    if status != "Out for Delivery":
-        return status
-
-    try:
-        from email.utils import parsedate_to_datetime
-        email_dt = parsedate_to_datetime(email_date)
-        now = datetime.now(email_dt.tzinfo) if email_dt.tzinfo else datetime.utcnow()
-        days_old = (now - email_dt).days
-
-        # If email is more than 2 days old and says "Out for Delivery", it's likely delivered
-        if days_old > 2:
-            logger.info(f"📅 Old 'Out for Delivery' email ({days_old} days) -> marking as 'Delivered'")
-            return "Delivered"
-    except Exception as e:
-        logger.debug(f"Could not parse email date for status inference: {e}")
-
+    """Compatibility hook: time elapsed is never delivery evidence."""
     return status
-
 
 
 @api_router.post("/gmail/sync")
@@ -1627,17 +1525,8 @@ async def gmail_sync(payload: GmailSyncRequest):
             hdrs = mdata.get("payload", {}).get("headers", [])
             subject = _get_header(hdrs, "Subject")
             frm = _get_header(hdrs, "From")
-            # Prefer Gmail's internalDate (ms since epoch) if available for reliable ordering.
-            internal_ms = mdata.get("internalDate")
-            date_hdr = _get_header(hdrs, "Date")
-            date = None
-            if internal_ms:
-                try:
-                    date = datetime.fromtimestamp(int(internal_ms) / 1000).isoformat()
-                except Exception:
-                    date = date_hdr
-            else:
-                date = date_hdr
+            # Gmail internalDate is milliseconds; normalize all dates to aware UTC ISO.
+            date = gmail_date(mdata.get("internalDate"), _get_header(hdrs, "Date"))
 
             body = _extract_message_body(mdata.get("payload", ""))
             snippet = mdata.get("snippet") or ""
@@ -1655,43 +1544,40 @@ async def gmail_sync(payload: GmailSyncRequest):
             try:
                 pr = await _gemini_parse_text(text)
                 item.product_name = pr.product_name
-                item.price = pr.price
+                # Never accept an LLM-extracted amount without corroborating email evidence.
+                item.price = None
                 if pr.platform:
                     item.platform = pr.platform
                 item.order_date = pr.order_date
                 item.expected_delivery = pr.expected_delivery
-                item.actual_delivery = pr.actual_delivery
+                item.actual_delivery = None
                 item.quantity = pr.quantity or 1
-                item.order_id = pr.order_id
-                item.status = pr.status
+                item.order_id = None
+                item.status = None
             except HTTPException as he:
                 item.parse_error = str(he.detail)
             except Exception as e:
                 item.parse_error = str(e)
 
-            # Post-process: improve status and actual_delivery extraction using body text
-            try:
-                body_analysis = _status_from_body(body, date)
-                # Prefer explicit Delivered detected in body over ambiguous statuses
-                if body_analysis.get("status"):
-                    item.status = body_analysis.get("status")
-                # Fill actual_delivery if available from LLM or body
-                if body_analysis.get("actual_delivery") and not item.actual_delivery:
-                    item.actual_delivery = body_analysis.get("actual_delivery")
-            except Exception:
-                pass
+            # Explicit email evidence only; avoid status phrases in quotations or predictions.
+            item.status = confirmed_status(subject, body)
+            body_analysis = _status_from_body(body, date)
+            if item.status == "Delivered":
+                item.actual_delivery = body_analysis.get("actual_delivery")
+                if not item.actual_delivery and date:
+                    item.actual_delivery = date[:10]
+            else:
+                item.actual_delivery = None
 
             # Platform-specific deterministic extraction (high-precision heuristics)
             try:
                 platform_guess = item.platform or parsed_platform
                 pext = _platform_specific_extract(platform_guess, body)
                 # Use deterministic values when LLM missed them
-                if not item.order_id and pext.get("order_id"):
-                    item.order_id = pext.get("order_id")
+                item.order_id = confirmed_order_id(body) or confirmed_order_id(subject or "")
                 if (not item.product_name or (item.product_name and len(item.product_name) < 5)) and pext.get("product_name"):
                     item.product_name = pext.get("product_name")
-                if (not item.price or item.price == 0) and pext.get("price"):
-                    item.price = pext.get("price")
+                item.price = confirmed_price(body) or confirmed_price(subject or "")
                 if not item.expected_delivery and pext.get("expected_delivery"):
                     item.expected_delivery = pext.get("expected_delivery")
                 if not item.order_date and pext.get("order_date"):
@@ -1699,11 +1585,8 @@ async def gmail_sync(payload: GmailSyncRequest):
             except Exception:
                 pass
 
-            # Try to extract order id from body if still missing
-            if not item.order_id and body:
-                morder = re.search(r"(?i)(?:order\s*(?:id|no|number)|order#|order[:#])\s*[:#\-\s]*([A-Za-z0-9-]+)", body)
-                if morder:
-                    item.order_id = morder.group(1)
+            if not item.order_id:
+                item.order_id = confirmed_order_id(body) or confirmed_order_id(subject or "")
 
             # Fallback: if product name is missing, try to extract from subject
             if not item.product_name and subject:
@@ -1721,81 +1604,32 @@ async def gmail_sync(payload: GmailSyncRequest):
                         # Use subject as fallback product name if it's not a generic prefix
                         item.product_name = subject[:100]  # Limit to 100 chars
 
-            # Fallback: if price is missing, try to extract from body text
-            if not item.price and body:
-                import re as regex
-                # Look for price patterns like "₹299", "Rs. 299", "Price: ₹299", etc.
-                match = regex.search(r"[₹Rs\.]*\s*(\d+(?:,\d{3})*(?:\.\d{2})?)", body)
-                if match:
-                    try:
-                        price_str = match.group(1).replace(",", "")
-                        item.price = float(price_str)
-                    except Exception:
-                        pass
-
-            # If we still don't have a price, use a placeholder so the order can be added
-            if not item.price:
-                item.price = 0  # Placeholder - user can edit later
-
-            # Subject-line status override — most reliable signal.
-            subj_status = _status_from_subject(subject)
-            if subj_status:
-                item.status = subj_status
-            elif not item.status:
-                item.status = "Ordered"
+            # Missing prices remain unknown, not zero or a random number.
+            item.price = confirmed_price(body) or confirmed_price(subject or "")
+            item.status = confirmed_status(subject, body)
+            if item.status != "Delivered":
+                item.actual_delivery = None
 
             # Normalize product name to remove color/size variants
             if item.product_name:
                 item.product_name = _normalize_product_name(item.product_name)
 
-            # Infer status from email age (old "Out for Delivery" emails are likely "Delivered")
-            if item.status and date:
-                item.status = _infer_status_from_age(item.status, date)
-
-            # If status is Delivered but LLM didn't extract actual_delivery,
-            # fall back to the email's send date as a good approximation.
-            if item.status == "Delivered" and not item.actual_delivery and date:
-                try:
-                    from email.utils import parsedate_to_datetime
-                    d = parsedate_to_datetime(date)
-                    if d:
-                        item.actual_delivery = d.date().isoformat()
-                except Exception:
-                    pass
-
-            collected.append(item)
+            # Multiple explicitly labeled products are separate order line items.
+            product_names = explicit_products(body)
+            if product_names:
+                for name in product_names:
+                    line_item = item.copy(deep=True)
+                    line_item.product_name = _normalize_product_name(name)
+                    collected.append(line_item)
+            else:
+                collected.append(item)
 
             # brief pacing to avoid rate limiting
             await asyncio.sleep(0.05)
 
-        # Deduplicate items: prefer entries with an order_id; otherwise group by product+platform.
-        from email.utils import parsedate_to_datetime
-
-        dedup: Dict[str, ParsedOrderItem] = {}
-        dedup_ts: Dict[str, float] = {}
-        for it in collected:
-            # Determine key
-            key = None
-            if it.order_id:
-                key = f"id:{it.order_id}"
-            else:
-                key = f"name:{(it.product_name or '').strip()}|{(it.platform or '').strip()}"
-
-            # Determine timestamp for ordering
-            ts = time.time()
-            if it.email_date:
-                try:
-                    dt = parsedate_to_datetime(it.email_date)
-                    ts = dt.timestamp()
-                except Exception:
-                    ts = time.time()
-
-            # Keep the item with latest timestamp
-            if key not in dedup or ts > dedup_ts.get(key, 0):
-                dedup[key] = it
-                dedup_ts[key] = ts
-
-        results = list(dedup.values())
+        # Match by platform, confirmed order ID and product; never merge unknown IDs
+        # just because their product names happen to be the same.
+        results = merge_by_evidence(collected)
 
     return {"count": len(results), "items": [r.dict() for r in results]}
 
